@@ -1,10 +1,15 @@
-﻿using Microsoft.Data.OData;
+﻿using Microsoft.Data.Edm;
+using Microsoft.Data.Edm.Csdl;
+using Microsoft.Data.Edm.Library;
+using Microsoft.Data.Edm.Validation;
+using Microsoft.Data.OData;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
 
 namespace ODataTry1
 {
@@ -96,11 +101,16 @@ namespace ODataTry1
         {
             MemoryStream ms = new MemoryStream(System.Text.Encoding.ASCII.GetBytes(data));
             IODataRequestMessage request = new ODataRequest(ms);
-            request.SetHeader("Content-Type", "application/atom+xml");
+            //request.SetHeader("Content-Type", "application/atom+xml");
+            request.SetHeader("Content-Type", "application/json");
 
+            IEdmModel model = GetModel();
+            ODataMessageReader omr = new ODataMessageReader(request, new ODataMessageReaderSettings(), model);
 
-            ODataMessageReader omr = new ODataMessageReader(request);
-            ODataReader odr = omr.CreateODataEntryReader();
+            IEdmEntityContainer eec = model.FindEntityContainer("TestModel.DefaultContainer");
+            IEdmEntitySet ees = eec.FindEntitySet("Customers");
+            IEdmEntityType eet = ees.ElementType;
+            ODataReader odr = omr.CreateODataEntryReader(ees, eet);
             while (odr.Read())
             {
                 switch (odr.State)
@@ -144,7 +154,7 @@ namespace ODataTry1
         public string Encode()
         {
             IODataRequestMessage request = new ODataRequest();
-            request.SetHeader("Accept", "application/atom+xml");
+            request.SetHeader("Accept", "application/json");
 
             ODataMessageWriterSettings writerSettings =
                 new ODataMessageWriterSettings()
@@ -154,11 +164,13 @@ namespace ODataTry1
                     BaseUri = new Uri("http://dima.com/"),  //set the base uri to use in relative links
                     Version = ODataVersion.V3               //set the Odata version to use when writing the entry
                 };
-            writerSettings.SetContentType(ODataFormat.Atom);
+            //writerSettings.SetContentType(ODataFormat.Atom);
+            writerSettings.SetContentType(ODataFormat.Json);
 
 
             //create message writing for the message
-            ODataMessageWriter messageWriter = new ODataMessageWriter(request, writerSettings);
+            IEdmModel model = GetModel();
+            ODataMessageWriter messageWriter = new ODataMessageWriter(request, writerSettings, model);
             //creates a streaming writer for a single entity
             ODataWriter writer = messageWriter.CreateODataEntryWriter();
 
@@ -167,14 +179,15 @@ namespace ODataTry1
             {
                 // the edit link is relative to the 
                 //baseUri set on the writer in the case
-                EditLink = new Uri("/Customers('" + "DimaCustomerId" +"')", UriKind.Relative),
+                //EditLink = new Uri("/Customers('" + "DimaCustomerId" +"')", UriKind.Relative),
                 Id = "Customers('" + "DimaCustomerId" + "')",
-                TypeName = "NORTHWNDModel.Customer",
+                TypeName = "Namespace.Customer",
                 Properties = new List<ODataProperty>(){
                         new ODataProperty(){ Name = "CustomerID", Value = "DimaCustomerId"},
                         new ODataProperty(){ Name = "CompanyName", Value = "DimaCustomerName"},
                         new ODataProperty(){ Name = "ContactName", Value = "DimaContactName"},
-                        new ODataProperty(){ Name = "ContactTitle", Value = "DimaContactTitle"}
+                        new ODataProperty(){ Name = "ContactTitle", Value = "DimaContactTitle"},
+                        new ODataProperty(){ Name = "NewProp", Value = "NewVal"}
                     }
             });
 
@@ -182,10 +195,41 @@ namespace ODataTry1
             writer.Flush();    //always flush at the end
 
             // my dirty part, convert stream to string
-            request.GetStream().Position = 0;
-            var sr = new StreamReader(request.GetStream());
+            var myStr = StreamToString(request.GetStream());
+            return myStr;
+        }
+
+        private static string StreamToString(Stream stream)
+        {
+            stream.Position = 0;
+            var sr = new StreamReader(stream);
             var myStr = sr.ReadToEnd();
             return myStr;
+        }
+
+        public IEdmModel GetModel()
+        {
+            var model= new EdmModel();
+            var customer = GetEntityType();
+            model.AddElement(customer);
+            var container= new EdmEntityContainer("TestModel", "DefaultContainer"); 
+            container.AddEntitySet("Customers", customer); 
+            model.AddElement(container);
+            return model;
+        }
+
+        private static EdmEntityType GetEntityType()
+        {
+            var customer = new EdmEntityType("Namespace", "Customer", null, false, true /*Open_Type*/);
+
+            bool isNullable = false;
+            var idProperty = customer.AddStructuralProperty("Id", EdmCoreModel.Instance.GetString(isNullable));
+            //customer.AddKeys(idProperty);
+            customer.AddStructuralProperty("CustomerID", EdmCoreModel.Instance.GetString(isNullable));
+            customer.AddStructuralProperty("CompanyName", EdmCoreModel.Instance.GetString(isNullable));
+            customer.AddStructuralProperty("ContactName", EdmCoreModel.Instance.GetString(isNullable));
+            customer.AddStructuralProperty("ContactTitle", EdmCoreModel.Instance.GetString(isNullable));
+            return customer;
         }
     }
 }
